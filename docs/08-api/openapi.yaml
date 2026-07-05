@@ -1,0 +1,1489 @@
+openapi: 3.0.3
+info:
+ title: SBI Sentinel API
+ description: >
+ Public REST API for **SBI Sentinel**: the Autonomous Financial Wellbeing Engine.
+ Invariant: the agents propose, the customer approves, the bank executes. No route in
+ this API moves money autonomously; `POST /v1/plans/{id}/approve` only enqueues a
+ bank-side execution against existing SBI rails. Every PII route is consent-gated
+ (DPDP) and every mutation is written to an append-only, hash-chained audit ledger.
+ version: 1.4.0
+ contact:
+ name: SBI Sentinel Platform Team
+ email: sentinel-platform@sbi.example
+ license:
+ name: Proprietary, SBI Sentinel (SBI Hackathon @ GFF 2026)
+servers:
+ - url: https://api.sentinel.sbi/v1
+ description: Production (India sovereign-cloud VPC)
+ - url: https://sandbox.api.sentinel.sbi/v1
+ description: Sandbox
+
+tags:
+ - name: Consent
+ description: DPDP consent artifacts. Required before any PII processing.
+ - name: Financial Health
+ description: Glass-box Financial Wellbeing Score (FWS 0-1000) and its six pillars.
+ - name: Risk & Fraud
+ description: Early-warning risk signals and fraud/anomaly alerts.
+ - name: Plans & Recommendations
+ description: Proposed intervention plans, simulations, compliance certificates, explanations.
+ - name: Approvals & Execution
+ description: Human-in-the-loop approval and bank-side execution status.
+ - name: Agents
+ description: Agent-run transparency and reasoning traces (Explainability Ledger).
+ - name: Audit
+ description: Append-only audit ledger (staff-only).
+ - name: Notifications
+ description: In-app notifications and channel preferences.
+ - name: Admin
+ description: Staff/admin operations (role-gated, 4-eyes on rule changes).
+
+security:
+ - oauth2: []
+
+paths:
+ # ---------------------------------------------------------------- Consent
+ /consent:
+ post:
+ tags: [Consent]
+ operationId: grantConsent
+ summary: Grant a DPDP consent for one or more purposes
+ parameters:
+ - $ref: '#/components/parameters/IdempotencyKey'
+ requestBody:
+ required: true
+ content:
+ application/json:
+ schema: { $ref: '#/components/schemas/ConsentRequest' }
+ example:
+ customer_id: cust_8Kd2Rj
+ purposes: [wellbeing_scoring, risk_monitoring, plan_generation, execution]
+ data_categories: [account_balances, transactions, loans, insurance_policies]
+ retention_days: 365
+ channel: yono_app
+ granted_via: explicit_toggle
+ responses:
+ '201':
+ description: Consent artifact created
+ headers:
+ RateLimit-Remaining: { $ref: '#/components/headers/RateLimitRemaining' }
+ content:
+ application/json:
+ schema: { $ref: '#/components/schemas/Consent' }
+ example:
+ id: cnsnt_Qop71a
+ customer_id: cust_8Kd2Rj
+ purposes: [wellbeing_scoring, risk_monitoring, plan_generation, execution]
+ data_categories: [account_balances, transactions, loans, insurance_policies]
+ status: active
+ retention_days: 365
+ channel: yono_app
+ granted_at: '2026-07-04T09:15:00Z'
+ expires_at: '2027-07-04T09:15:00Z'
+ artifact_hash: 'sha256:8f2c1b9d4e7a6c0f5b3a2d1e9c8b7a6f5e4d3c2b1a0f9e8d7c6b5a4f3e2d1c0b'
+ audit_ref: aud_01J8Z7Q3M6R7F0K2V9A1B3C4D5
+ '400': { $ref: '#/components/responses/ValidationFailed' }
+ '401': { $ref: '#/components/responses/Unauthenticated' }
+ '409': { $ref: '#/components/responses/Conflict' }
+ '422': { $ref: '#/components/responses/UnprocessableEntity' }
+ '429': { $ref: '#/components/responses/RateLimited' }
+ get:
+ tags: [Consent]
+ operationId: listConsents
+ summary: List the caller's consent artifacts
+ parameters:
+ - $ref: '#/components/parameters/Limit'
+ - $ref: '#/components/parameters/Cursor'
+ - name: status
+ in: query
+ schema: { type: string, enum: [active, expired, revoked] }
+ responses:
+ '200':
+ description: Paginated list of consents
+ content:
+ application/json:
+ schema:
+ type: object
+ required: [data, page]
+ properties:
+ data:
+ type: array
+ items: { $ref: '#/components/schemas/Consent' }
+ page: { $ref: '#/components/schemas/Page' }
+ '401': { $ref: '#/components/responses/Unauthenticated' }
+
+ /consent/{id}:
+ parameters:
+ - $ref: '#/components/parameters/ConsentId'
+ get:
+ tags: [Consent]
+ operationId: getConsent
+ summary: Fetch one consent artifact
+ responses:
+ '200':
+ description: Consent artifact
+ content:
+ application/json:
+ schema: { $ref: '#/components/schemas/Consent' }
+ '401': { $ref: '#/components/responses/Unauthenticated' }
+ '404': { $ref: '#/components/responses/NotFound' }
+ delete:
+ tags: [Consent]
+ operationId: revokeConsent
+ summary: Revoke a consent (soft, tombstoned, emits consent.revoked)
+ parameters:
+ - $ref: '#/components/parameters/IdempotencyKey'
+ responses:
+ '200':
+ description: Consent revoked
+ content:
+ application/json:
+ schema: { $ref: '#/components/schemas/Consent' }
+ example:
+ id: cnsnt_Qop71a
+ customer_id: cust_8Kd2Rj
+ status: revoked
+ revoked_at: '2026-07-04T18:00:00Z'
+ artifact_hash: 'sha256:8f2c1b9d4e7a6c0f5b3a2d1e9c8b7a6f5e4d3c2b1a0f9e8d7c6b5a4f3e2d1c0b'
+ audit_ref: aud_01J8ZE0P4R7T0V3X6Z9B2D5G8J1
+ '401': { $ref: '#/components/responses/Unauthenticated' }
+ '404': { $ref: '#/components/responses/NotFound' }
+
+ # ---------------------------------------------------------- Financial Health
+ /customers/{id}/wellbeing-score:
+ parameters:
+ - $ref: '#/components/parameters/CustomerId'
+ get:
+ tags: [Financial Health]
+ operationId: getWellbeingScore
+ summary: Current Financial Wellbeing Score (0-1000)
+ responses:
+ '200':
+ description: Current FWS with band and pillar breakdown
+ content:
+ application/json:
+ schema: { $ref: '#/components/schemas/WellbeingScore' }
+ example:
+ customer_id: cust_8Kd2Rj
+ score: 612
+ band: at_risk
+ delta_30d: -18
+ computed_at: '2026-07-04T06:00:12Z'
+ model_version: fws-1.4.0
+ evidence_ref: ev_wb_cust_8Kd2Rj_20260704
+ consent_id: cnsnt_Qop71a
+ pillars:
+ - key: emergency_buffer
+ weight: 0.20
+ normalized: 0.45
+ points: 90
+ band: critical
+ signal: { months_of_essential_spend: 2.7, target_months: 6 }
+ '401': { $ref: '#/components/responses/Unauthenticated' }
+ '403': { $ref: '#/components/responses/ConsentRequired' }
+ '404': { $ref: '#/components/responses/NotFound' }
+
+ /customers/{id}/wellbeing-score/pillars:
+ parameters:
+ - $ref: '#/components/parameters/CustomerId'
+ get:
+ tags: [Financial Health]
+ operationId: getWellbeingPillars
+ summary: The six FWS pillar sub-scores
+ responses:
+ '200':
+ description: Pillar breakdown
+ content:
+ application/json:
+ schema:
+ type: object
+ required: [customer_id, pillars]
+ properties:
+ customer_id: { type: string }
+ pillars:
+ type: array
+ items: { $ref: '#/components/schemas/Pillar' }
+ '403': { $ref: '#/components/responses/ConsentRequired' }
+ '404': { $ref: '#/components/responses/NotFound' }
+
+ /customers/{id}/wellbeing-score/history:
+ parameters:
+ - $ref: '#/components/parameters/CustomerId'
+ get:
+ tags: [Financial Health]
+ operationId: getWellbeingHistory
+ summary: Time series of FWS
+ parameters:
+ - name: from
+ in: query
+ schema: { type: string, format: date-time }
+ - name: to
+ in: query
+ schema: { type: string, format: date-time }
+ - name: interval
+ in: query
+ schema: { type: string, enum: [day, week, month], default: week }
+ - $ref: '#/components/parameters/Limit'
+ - $ref: '#/components/parameters/Cursor'
+ responses:
+ '200':
+ description: FWS history points
+ content:
+ application/json:
+ schema:
+ type: object
+ required: [data, page]
+ properties:
+ data:
+ type: array
+ items:
+ type: object
+ properties:
+ at: { type: string, format: date-time }
+ score: { type: integer }
+ band: { $ref: '#/components/schemas/Band' }
+ page: { $ref: '#/components/schemas/Page' }
+ '403': { $ref: '#/components/responses/ConsentRequired' }
+
+ # -------------------------------------------------------------- Risk & Fraud
+ /customers/{id}/risks:
+ parameters:
+ - $ref: '#/components/parameters/CustomerId'
+ get:
+ tags: [Risk & Fraud]
+ operationId: listRisks
+ summary: Active early-warning risk signals
+ parameters:
+ - name: severity
+ in: query
+ schema: { $ref: '#/components/schemas/Severity' }
+ responses:
+ '200':
+ description: Risk signals
+ content:
+ application/json:
+ schema:
+ type: object
+ required: [data]
+ properties:
+ data:
+ type: array
+ items: { $ref: '#/components/schemas/RiskSignal' }
+ example:
+ data:
+ - id: risk_Ab12Cd
+ customer_id: cust_8Kd2Rj
+ type: emi_bounce
+ probability: 0.71
+ eta_days: 9
+ severity: high
+ description: Home-loan EMI likely to bounce next cycle.
+ evidence_ref: ev_risk_cust_8Kd2Rj_emi
+ detected_at: '2026-07-04T06:05:00Z'
+ '403': { $ref: '#/components/responses/ConsentRequired' }
+
+ /customers/{id}/fraud-alerts:
+ parameters:
+ - $ref: '#/components/parameters/CustomerId'
+ get:
+ tags: [Risk & Fraud]
+ operationId: listFraudAlerts
+ summary: Open fraud / anomaly alerts
+ parameters:
+ - name: status
+ in: query
+ schema: { type: string, enum: [open, acknowledged, frozen, resolved] }
+ responses:
+ '200':
+ description: Fraud alerts
+ content:
+ application/json:
+ schema:
+ type: object
+ required: [data]
+ properties:
+ data:
+ type: array
+ items: { $ref: '#/components/schemas/FraudAlert' }
+ '403': { $ref: '#/components/responses/ConsentRequired' }
+
+ /customers/{id}/fraud-alerts/{alertId}/freeze:
+ parameters:
+ - $ref: '#/components/parameters/CustomerId'
+ - name: alertId
+ in: path
+ required: true
+ schema: { type: string }
+ post:
+ tags: [Risk & Fraud]
+ operationId: freezeOnFraudAlert
+ summary: Customer-consented freeze (hold request, does NOT move money)
+ description: >
+ Requests a hold on the flagged instrument/transaction via core banking. Requires
+ step-up auth (token `acr`) and an idempotency key. Never debits or transfers funds.
+ parameters:
+ - $ref: '#/components/parameters/IdempotencyKey'
+ requestBody:
+ required: true
+ content:
+ application/json:
+ schema:
+ type: object
+ required: [consent_id, customer_acknowledgement]
+ properties:
+ consent_id: { type: string, pattern: '^cnsnt_[A-Za-z0-9]+$' }
+ customer_acknowledgement: { type: string }
+ scope: { type: string, enum: [transaction, card, account], default: transaction }
+ responses:
+ '202':
+ description: Freeze request accepted (enqueued to core banking)
+ content:
+ application/json:
+ schema:
+ type: object
+ properties:
+ alert_id: { type: string }
+ status: { type: string, enum: [freeze_pending] }
+ audit_ref: { type: string }
+ example:
+ alert_id: fraud_9zXy1Q
+ status: freeze_pending
+ audit_ref: aud_01J8ZF1P4R7T0V3X6Z9B2D5G8J2
+ '401': { $ref: '#/components/responses/Unauthenticated' }
+ '403': { $ref: '#/components/responses/ConsentRequired' }
+ '404': { $ref: '#/components/responses/NotFound' }
+ '409': { $ref: '#/components/responses/Conflict' }
+
+ # ------------------------------------------------- Plans & Recommendations
+ /customers/{id}/recommendations:
+ parameters:
+ - $ref: '#/components/parameters/CustomerId'
+ get:
+ tags: [Plans & Recommendations]
+ operationId: listRecommendations
+ summary: Ranked open recommendations (each links to a plan)
+ parameters:
+ - $ref: '#/components/parameters/Limit'
+ - $ref: '#/components/parameters/Cursor'
+ responses:
+ '200':
+ description: Recommendations
+ content:
+ application/json:
+ schema:
+ type: object
+ required: [data, page]
+ properties:
+ data:
+ type: array
+ items: { $ref: '#/components/schemas/Recommendation' }
+ page: { $ref: '#/components/schemas/Page' }
+ '403': { $ref: '#/components/responses/ConsentRequired' }
+
+ /plans/{id}:
+ parameters:
+ - $ref: '#/components/parameters/PlanId'
+ get:
+ tags: [Plans & Recommendations]
+ operationId: getPlan
+ summary: Full plan with 2-3 options
+ responses:
+ '200':
+ description: Plan
+ content:
+ application/json:
+ schema: { $ref: '#/components/schemas/Plan' }
+ example:
+ id: plan_5tRk9c
+ customer_id: cust_8Kd2Rj
+ status: proposed
+ created_at: '2026-07-04T06:06:00Z'
+ expires_at: '2026-07-11T06:06:00Z'
+ issue:
+ type: emi_bounce
+ confidence: 0.71
+ evidence_ref: ev_risk_cust_8Kd2Rj_emi
+ compliance_certified: true
+ compliance_certificate_id: cert_9Yh2Lm
+ options:
+ - option_id: opt_A
+ summary: Partial prepay defer by one cycle.
+ projected_fws: 648
+ reversible: true
+ actions: [{ type: emi_defer, cycles: 1 }]
+ - option_id: opt_B
+ summary: Sweep 45,000 INR from fixed deposit to savings.
+ projected_fws: 690
+ reversible: true
+ actions:
+ - type: fd_partial_liquidation
+ account: acct_FD_11a2
+ amount: { amount: 4500000, currency: INR }
+ - option_id: opt_C
+ summary: Restructure SIP debit date to post-salary.
+ projected_fws: 655
+ reversible: true
+ actions: [{ type: sip_reschedule, new_day: 3 }]
+ '403': { $ref: '#/components/responses/ConsentRequired' }
+ '404': { $ref: '#/components/responses/NotFound' }
+
+ /plans/{id}/simulation:
+ parameters:
+ - $ref: '#/components/parameters/PlanId'
+ get:
+ tags: [Plans & Recommendations]
+ operationId: getPlanSimulation
+ summary: Monte-Carlo / what-if projection per option
+ responses:
+ '200':
+ description: Simulation
+ content:
+ application/json:
+ schema: { $ref: '#/components/schemas/Simulation' }
+ '403': { $ref: '#/components/responses/ConsentRequired' }
+ '404': { $ref: '#/components/responses/NotFound' }
+
+ /plans/{id}/compliance-certificate:
+ parameters:
+ - $ref: '#/components/parameters/PlanId'
+ get:
+ tags: [Plans & Recommendations]
+ operationId: getComplianceCertificate
+ summary: The Compliance Agent's certificate (certify/veto + rule evidence)
+ responses:
+ '200':
+ description: Compliance certificate
+ content:
+ application/json:
+ schema: { $ref: '#/components/schemas/ComplianceCertificate' }
+ example:
+ id: cert_9Yh2Lm
+ plan_id: plan_5tRk9c
+ decision: certify
+ ruleset_version: rbi-dpdp-2026.02
+ certificate_hash: 'sha256:1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b'
+ evaluated_at: '2026-07-04T06:06:30Z'
+ checks:
+ - { rule: suitability.risk_profile_match, result: pass }
+ - { rule: misselling.no_unsuitable_cross_sell, result: pass }
+ - { rule: dpdp.purpose_limitation, result: pass }
+ - { rule: rbi.no_autonomous_debit, result: pass }
+ vetoed_options: []
+ '403': { $ref: '#/components/responses/ConsentRequired' }
+ '404': { $ref: '#/components/responses/NotFound' }
+
+ /plans/{id}/explanation:
+ parameters:
+ - $ref: '#/components/parameters/PlanId'
+ get:
+ tags: [Plans & Recommendations]
+ operationId: getPlanExplanation
+ summary: Plain-language why + evidence + reasoning trail
+ responses:
+ '200':
+ description: Explanation
+ content:
+ application/json:
+ schema: { $ref: '#/components/schemas/Explanation' }
+ '403': { $ref: '#/components/responses/ConsentRequired' }
+ '404': { $ref: '#/components/responses/NotFound' }
+
+ # -------------------------------------------------- Approvals & Execution
+ /plans/{id}/approve:
+ parameters:
+ - $ref: '#/components/parameters/PlanId'
+ post:
+ tags: [Approvals & Execution]
+ operationId: approvePlan
+ summary: Approve one option, enqueues bank execution (the only real-world action)
+ description: >
+ Requires valid plan_generation + execution consent, a non-vetoed certificate, step-up
+ auth (token acr), an Idempotency-Key, and the certificate_hash the customer saw
+ (optimistic lock). Returns 202 with a pending Execution; the bank rail runs async.
+ security:
+ - oauth2: [plans:approve]
+ parameters:
+ - $ref: '#/components/parameters/IdempotencyKey'
+ requestBody:
+ required: true
+ content:
+ application/json:
+ schema: { $ref: '#/components/schemas/Approval' }
+ example:
+ selected_option_id: opt_B
+ certificate_hash: 'sha256:1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b'
+ consent_id: cnsnt_Qop71a
+ customer_acknowledgement: I approve executing the FD sweep as described.
+ responses:
+ '202':
+ description: Approval accepted; execution enqueued
+ content:
+ application/json:
+ schema: { $ref: '#/components/schemas/Execution' }
+ example:
+ execution_id: exec_Zn3Qp8
+ plan_id: plan_5tRk9c
+ selected_option_id: opt_B
+ status: pending
+ rail: core_banking_fd_sweep
+ estimated_settlement: '2026-07-04T12:30:00Z'
+ reversible: true
+ compliance_certificate_id: cert_9Yh2Lm
+ audit_ref: aud_01J8ZB4K7N9Q2S5U8W1Y4A7C0E
+ poll_url: /v1/executions/exec_Zn3Qp8
+ actions:
+ - type: fd_partial_liquidation
+ account: acct_FD_11a2
+ amount: { amount: 4500000, currency: INR }
+ - type: credit_to_savings
+ account: acct_SB_77c9
+ amount: { amount: 4500000, currency: INR }
+ '401': { $ref: '#/components/responses/Unauthenticated' }
+ '403': { $ref: '#/components/responses/ConsentRequired' }
+ '404': { $ref: '#/components/responses/NotFound' }
+ '409':
+ description: Certificate changed since shown, or plan already actioned
+ content:
+ application/json:
+ schema: { $ref: '#/components/schemas/Error' }
+ '422':
+ description: Plan not approvable (vetoed / expired / no certificate)
+ content:
+ application/json:
+ schema: { $ref: '#/components/schemas/Error' }
+ example:
+ error:
+ code: plan_not_approvable
+ message: Plan plan_5tRk9c was vetoed by compliance and cannot be approved.
+ status: 422
+ trace_id: 01J8ZC0P4R7T0V3X6Z9B2D5G8J1
+ '429': { $ref: '#/components/responses/RateLimited' }
+
+ /plans/{id}/reject:
+ parameters:
+ - $ref: '#/components/parameters/PlanId'
+ post:
+ tags: [Approvals & Execution]
+ operationId: rejectPlan
+ summary: Reject the plan (optional reason)
+ security:
+ - oauth2: [plans:approve]
+ parameters:
+ - $ref: '#/components/parameters/IdempotencyKey'
+ requestBody:
+ required: false
+ content:
+ application/json:
+ schema:
+ type: object
+ properties:
+ reason: { type: string, maxLength: 500 }
+ responses:
+ '200':
+ description: Plan rejected
+ content:
+ application/json:
+ schema: { $ref: '#/components/schemas/Plan' }
+ '404': { $ref: '#/components/responses/NotFound' }
+ '409': { $ref: '#/components/responses/Conflict' }
+
+ /executions/{id}:
+ parameters:
+ - name: id
+ in: path
+ required: true
+ schema: { type: string, pattern: '^exec_[A-Za-z0-9]+$' }
+ get:
+ tags: [Approvals & Execution]
+ operationId: getExecution
+ summary: Status of a bank-side execution
+ security:
+ - oauth2: [executions:read]
+ responses:
+ '200':
+ description: Execution status
+ content:
+ application/json:
+ schema: { $ref: '#/components/schemas/Execution' }
+ '404': { $ref: '#/components/responses/NotFound' }
+
+ # ------------------------------------------------------------------ Agents
+ /agent-runs:
+ get:
+ tags: [Agents]
+ operationId: listAgentRuns
+ summary: List agent runs
+ security:
+ - oauth2: [agents:read]
+ parameters:
+ - name: customer
+ in: query
+ schema: { type: string }
+ - name: type
+ in: query
+ schema: { type: string, enum: [orchestrator, financial_health, risk, fraud, planner, simulation, compliance, explainability] }
+ - name: status
+ in: query
+ schema: { type: string, enum: [running, succeeded, failed, escalated] }
+ - $ref: '#/components/parameters/Limit'
+ - $ref: '#/components/parameters/Cursor'
+ responses:
+ '200':
+ description: Agent runs
+ content:
+ application/json:
+ schema:
+ type: object
+ required: [data, page]
+ properties:
+ data:
+ type: array
+ items: { $ref: '#/components/schemas/AgentRun' }
+ page: { $ref: '#/components/schemas/Page' }
+ '401': { $ref: '#/components/responses/Unauthenticated' }
+
+ /agent-runs/{id}/trace:
+ parameters:
+ - name: id
+ in: path
+ required: true
+ schema: { type: string }
+ get:
+ tags: [Agents]
+ operationId: getAgentRunTrace
+ summary: Step-by-step LangGraph reasoning trace (no PII)
+ security:
+ - oauth2: [agents:read]
+ responses:
+ '200':
+ description: Reasoning trace
+ content:
+ application/json:
+ schema: { $ref: '#/components/schemas/AgentTrace' }
+ '404': { $ref: '#/components/responses/NotFound' }
+
+ # ------------------------------------------------------------------- Audit
+ /audit:
+ get:
+ tags: [Audit]
+ operationId: queryAudit
+ summary: Query the append-only audit ledger (staff-only)
+ security:
+ - oauth2: [audit:read]
+ parameters:
+ - name: actor
+ in: query
+ schema: { type: string }
+ - name: customer
+ in: query
+ schema: { type: string }
+ - name: action
+ in: query
+ schema: { type: string }
+ - name: resource_type
+ in: query
+ schema: { type: string }
+ - name: from
+ in: query
+ schema: { type: string, format: date-time }
+ - name: to
+ in: query
+ schema: { type: string, format: date-time }
+ - $ref: '#/components/parameters/Limit'
+ - $ref: '#/components/parameters/Cursor'
+ responses:
+ '200':
+ description: Hash-chained audit records
+ content:
+ application/json:
+ schema:
+ type: object
+ required: [data, page]
+ properties:
+ data:
+ type: array
+ items: { $ref: '#/components/schemas/AuditRecord' }
+ page: { $ref: '#/components/schemas/Page' }
+ '401': { $ref: '#/components/responses/Unauthenticated' }
+ '403': { $ref: '#/components/responses/Forbidden' }
+
+ # ----------------------------------------------------------- Notifications
+ /notifications:
+ get:
+ tags: [Notifications]
+ operationId: listNotifications
+ summary: Caller's in-app notifications
+ parameters:
+ - name: unread_only
+ in: query
+ schema: { type: boolean, default: false }
+ - $ref: '#/components/parameters/Limit'
+ - $ref: '#/components/parameters/Cursor'
+ responses:
+ '200':
+ description: Notifications
+ content:
+ application/json:
+ schema:
+ type: object
+ required: [data, page]
+ properties:
+ data:
+ type: array
+ items: { $ref: '#/components/schemas/Notification' }
+ page: { $ref: '#/components/schemas/Page' }
+
+ /notifications/{id}/ack:
+ parameters:
+ - name: id
+ in: path
+ required: true
+ schema: { type: string }
+ post:
+ tags: [Notifications]
+ operationId: ackNotification
+ summary: Mark a notification acknowledged
+ responses:
+ '204': { description: Acknowledged }
+ '404': { $ref: '#/components/responses/NotFound' }
+
+ /notifications/preferences:
+ get:
+ tags: [Notifications]
+ operationId: getNotificationPreferences
+ summary: Channel preferences
+ responses:
+ '200':
+ description: Preferences
+ content:
+ application/json:
+ schema: { $ref: '#/components/schemas/NotificationPreferences' }
+ put:
+ tags: [Notifications]
+ operationId: updateNotificationPreferences
+ summary: Update channel preferences
+ requestBody:
+ required: true
+ content:
+ application/json:
+ schema: { $ref: '#/components/schemas/NotificationPreferences' }
+ responses:
+ '200':
+ description: Updated preferences
+ content:
+ application/json:
+ schema: { $ref: '#/components/schemas/NotificationPreferences' }
+
+ # ------------------------------------------------------------------- Admin
+ /admin/customers:
+ get:
+ tags: [Admin]
+ operationId: adminListCustomers
+ summary: Search / list customers (tokenized)
+ security:
+ - oauth2: [admin]
+ parameters:
+ - name: q
+ in: query
+ schema: { type: string }
+ - $ref: '#/components/parameters/Limit'
+ - $ref: '#/components/parameters/Cursor'
+ responses:
+ '200':
+ description: Customers
+ content:
+ application/json:
+ schema:
+ type: object
+ required: [data, page]
+ properties:
+ data:
+ type: array
+ items:
+ type: object
+ properties:
+ id: { type: string }
+ display_name: { type: string }
+ band: { $ref: '#/components/schemas/Band' }
+ page: { $ref: '#/components/schemas/Page' }
+ '403': { $ref: '#/components/responses/Forbidden' }
+
+ /admin/rules:
+ get:
+ tags: [Admin]
+ operationId: adminListRules
+ summary: List active compliance rules + versions
+ security:
+ - oauth2: [admin]
+ responses:
+ '200':
+ description: Rules
+ content:
+ application/json:
+ schema:
+ type: object
+ properties:
+ ruleset_version: { type: string }
+ rules:
+ type: array
+ items:
+ type: object
+ properties:
+ rule: { type: string }
+ enabled: { type: boolean }
+ category: { type: string, enum: [rbi, dpdp, suitability, misselling] }
+ '403': { $ref: '#/components/responses/Forbidden' }
+
+ /admin/rules/{ruleId}/toggle:
+ parameters:
+ - name: ruleId
+ in: path
+ required: true
+ schema: { type: string }
+ post:
+ tags: [Admin]
+ operationId: adminToggleRule
+ summary: Enable/disable a compliance rule (audited, 4-eyes)
+ security:
+ - oauth2: [admin]
+ parameters:
+ - $ref: '#/components/parameters/IdempotencyKey'
+ requestBody:
+ required: true
+ content:
+ application/json:
+ schema:
+ type: object
+ required: [enabled, second_approver]
+ properties:
+ enabled: { type: boolean }
+ second_approver: { type: string, description: Staff id of the 4-eyes approver }
+ reason: { type: string }
+ responses:
+ '200':
+ description: Rule toggled
+ content:
+ application/json:
+ schema:
+ type: object
+ properties:
+ rule: { type: string }
+ enabled: { type: boolean }
+ audit_ref: { type: string }
+ '403': { $ref: '#/components/responses/Forbidden' }
+
+ /admin/health:
+ get:
+ tags: [Admin]
+ operationId: adminHealth
+ summary: Service health / SLO feed
+ security:
+ - oauth2: [admin]
+ responses:
+ '200':
+ description: Health snapshot
+ content:
+ application/json:
+ schema:
+ type: object
+ properties:
+ status: { type: string, enum: [ok, degraded, down] }
+ services:
+ type: array
+ items:
+ type: object
+ properties:
+ name: { type: string }
+ status: { type: string }
+ p99_ms: { type: number }
+
+ /admin/escalations/{id}/assign:
+ parameters:
+ - name: id
+ in: path
+ required: true
+ schema: { type: string }
+ post:
+ tags: [Admin]
+ operationId: adminAssignEscalation
+ summary: Assign a human-RM escalation (veto / low confidence)
+ security:
+ - oauth2: [admin]
+ requestBody:
+ required: true
+ content:
+ application/json:
+ schema:
+ type: object
+ required: [assignee]
+ properties:
+ assignee: { type: string }
+ note: { type: string }
+ responses:
+ '200':
+ description: Assigned
+ content:
+ application/json:
+ schema:
+ type: object
+ properties:
+ escalation_id: { type: string }
+ assignee: { type: string }
+ status: { type: string, enum: [assigned] }
+ '403': { $ref: '#/components/responses/Forbidden' }
+
+components:
+ securitySchemes:
+ oauth2:
+ type: oauth2
+ description: >
+ OAuth2 Authorization Code + PKCE via SBI OIDC (YONO SSO for customers, enterprise IdP
+ for staff). Access tokens are short-lived JWTs; approval routes require step-up auth
+ (elevated `acr`). Internal service-to-service calls additionally use mTLS with SPIFFE
+ identities on the mesh (not modelled here as it is not a client-facing scheme).
+ flows:
+ authorizationCode:
+ authorizationUrl: https://id.sbi.example/oauth2/authorize
+ tokenUrl: https://id.sbi.example/oauth2/token
+ refreshUrl: https://id.sbi.example/oauth2/token
+ scopes:
+ consent:read: Read consent artifacts
+ consent:write: Grant/revoke consent
+ wellbeing:read: Read FWS and notifications
+ risk:read: Read risk signals
+ fraud:read: Read fraud alerts
+ fraud:act: Request a consented fraud freeze
+ plans:read: Read plans, simulations, certificates, explanations
+ plans:approve: Approve or reject a plan
+ executions:read: Read execution status
+ agents:read: Read agent runs and traces
+ audit:read: Read the audit ledger (staff)
+ admin: Administrative operations (staff)
+
+ parameters:
+ CustomerId:
+ name: id
+ in: path
+ required: true
+ description: Tokenized customer ref, or `me` for the authenticated customer.
+ schema: { type: string, pattern: '^(cust_[A-Za-z0-9]+|me)$' }
+ ConsentId:
+ name: id
+ in: path
+ required: true
+ schema: { type: string, pattern: '^cnsnt_[A-Za-z0-9]+$' }
+ PlanId:
+ name: id
+ in: path
+ required: true
+ schema: { type: string, pattern: '^plan_[A-Za-z0-9]+$' }
+ IdempotencyKey:
+ name: Idempotency-Key
+ in: header
+ required: true
+ description: Client-generated UUID; the first response for a key is replayed for 24h.
+ schema: { type: string, format: uuid }
+ Limit:
+ name: limit
+ in: query
+ schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+ Cursor:
+ name: cursor
+ in: query
+ schema: { type: string }
+
+ headers:
+ RateLimitRemaining:
+ description: Requests remaining in the current window.
+ schema: { type: integer }
+
+ responses:
+ ValidationFailed:
+ description: Request failed validation
+ content:
+ application/json:
+ schema: { $ref: '#/components/schemas/Error' }
+ example:
+ error:
+ code: validation_failed
+ message: 'purposes must contain at least one purpose.'
+ status: 400
+ trace_id: 01J8ZC0P4R7T0V3X6Z9B2D5G8J1
+ details:
+ - { field: purposes, issue: min_items, value: '0' }
+ Unauthenticated:
+ description: Missing or invalid token
+ content:
+ application/json:
+ schema: { $ref: '#/components/schemas/Error' }
+ example:
+ error: { code: unauthenticated, message: Access token is missing or expired., status: 401, trace_id: 01J8ZC0P4R7T0V3X6Z9B2D5G8J1 }
+ Forbidden:
+ description: Authenticated but not authorized (role/scope)
+ content:
+ application/json:
+ schema: { $ref: '#/components/schemas/Error' }
+ example:
+ error: { code: forbidden, message: Role 'rm' cannot read the audit ledger., status: 403, trace_id: 01J8ZC0P4R7T0V3X6Z9B2D5G8J1 }
+ ConsentRequired:
+ description: No active DPDP consent for the required purpose
+ content:
+ application/json:
+ schema: { $ref: '#/components/schemas/Error' }
+ example:
+ error:
+ code: consent_required
+ message: No active DPDP consent for purpose 'plan_generation'.
+ status: 403
+ trace_id: 01J8ZC0P4R7T0V3X6Z9B2D5G8J1
+ details:
+ - { field: purpose, issue: missing, value: plan_generation }
+ NotFound:
+ description: Resource not found
+ content:
+ application/json:
+ schema: { $ref: '#/components/schemas/Error' }
+ example:
+ error: { code: not_found, message: Resource not found., status: 404, trace_id: 01J8ZC0P4R7T0V3X6Z9B2D5G8J1 }
+ Conflict:
+ description: State conflict (duplicate / optimistic-lock / already actioned)
+ content:
+ application/json:
+ schema: { $ref: '#/components/schemas/Error' }
+ example:
+ error: { code: conflict, message: Compliance certificate changed since it was shown., status: 409, trace_id: 01J8ZC0P4R7T0V3X6Z9B2D5G8J1 }
+ UnprocessableEntity:
+ description: Semantically invalid (e.g. idempotency key reused with different body)
+ content:
+ application/json:
+ schema: { $ref: '#/components/schemas/Error' }
+ example:
+ error: { code: idempotency_key_reused, message: Idempotency-Key reused with a different request body., status: 422, trace_id: 01J8ZC0P4R7T0V3X6Z9B2D5G8J1 }
+ RateLimited:
+ description: Too many requests
+ headers:
+ Retry-After:
+ description: Seconds until the caller may retry.
+ schema: { type: integer }
+ content:
+ application/json:
+ schema: { $ref: '#/components/schemas/Error' }
+ example:
+ error: { code: rate_limited, message: Rate limit exceeded., status: 429, trace_id: 01J8ZC0P4R7T0V3X6Z9B2D5G8J1 }
+
+ schemas:
+ Money:
+ type: object
+ description: Amount in integer minor units (paise) plus ISO-4217 currency.
+ required: [amount, currency]
+ properties:
+ amount: { type: integer, description: Value in paise (100 paise = 1 INR). }
+ currency: { type: string, enum: [INR] }
+
+ Page:
+ type: object
+ required: [limit]
+ properties:
+ next_cursor: { type: string, nullable: true }
+ limit: { type: integer }
+
+ Band:
+ type: string
+ enum: [critical, at_risk, stable, thriving]
+
+ Severity:
+ type: string
+ enum: [low, medium, high, critical]
+
+ ConsentRequest:
+ type: object
+ required: [customer_id, purposes, data_categories]
+ properties:
+ customer_id: { type: string, pattern: '^cust_[A-Za-z0-9]+$' }
+ purposes:
+ type: array
+ minItems: 1
+ items:
+ type: string
+ enum: [wellbeing_scoring, risk_monitoring, fraud_detection, plan_generation, execution]
+ data_categories:
+ type: array
+ minItems: 1
+ items:
+ type: string
+ enum: [account_balances, transactions, loans, insurance_policies, investments]
+ retention_days: { type: integer, minimum: 1, maximum: 3650, default: 365 }
+ channel: { type: string, enum: [yono_app, web, branch, rm_console] }
+ granted_via: { type: string, enum: [explicit_toggle, e_sign, otp] }
+
+ Consent:
+ type: object
+ required: [id, customer_id, purposes, status, artifact_hash]
+ properties:
+ id: { type: string }
+ customer_id: { type: string }
+ purposes: { type: array, items: { type: string } }
+ data_categories: { type: array, items: { type: string } }
+ status: { type: string, enum: [active, expired, revoked] }
+ retention_days: { type: integer }
+ channel: { type: string }
+ granted_at: { type: string, format: date-time }
+ expires_at: { type: string, format: date-time }
+ revoked_at: { type: string, format: date-time, nullable: true }
+ artifact_hash: { type: string, description: SHA-256 of the signed artifact, anchored in the audit ledger. }
+ audit_ref: { type: string }
+
+ Pillar:
+ type: object
+ required: [key, weight, normalized, points]
+ properties:
+ key:
+ type: string
+ enum: [cashflow_resilience, emergency_buffer, debt_health, protection, wealth_growth, behavioral_hygiene]
+ weight: { type: number, format: float, description: Pillar weight (0-1). }
+ normalized: { type: number, format: float, minimum: 0, maximum: 1 }
+ points: { type: integer, description: Contribution to the 0-1000 score. }
+ band: { $ref: '#/components/schemas/Band' }
+ signal: { type: object, additionalProperties: true, description: Underlying signals (glass-box). }
+ evidence_ref: { type: string }
+
+ WellbeingScore:
+ type: object
+ required: [customer_id, score, band, computed_at, pillars]
+ properties:
+ customer_id: { type: string }
+ score: { type: integer, minimum: 0, maximum: 1000 }
+ band: { $ref: '#/components/schemas/Band' }
+ delta_30d: { type: integer }
+ computed_at: { type: string, format: date-time }
+ model_version: { type: string }
+ pillars:
+ type: array
+ items: { $ref: '#/components/schemas/Pillar' }
+ evidence_ref: { type: string }
+ consent_id: { type: string }
+
+ RiskSignal:
+ type: object
+ required: [id, type, probability, severity]
+ properties:
+ id: { type: string }
+ customer_id: { type: string }
+ type: { type: string, enum: [emi_bounce, overdraft, liquidity_crunch, npa_slide] }
+ probability: { type: number, minimum: 0, maximum: 1 }
+ eta_days: { type: integer }
+ severity: { $ref: '#/components/schemas/Severity' }
+ description: { type: string }
+ evidence_ref: { type: string }
+ detected_at: { type: string, format: date-time }
+
+ FraudAlert:
+ type: object
+ required: [id, customer_id, severity, status]
+ properties:
+ id: { type: string }
+ customer_id: { type: string }
+ pattern: { type: string, description: e.g. upi_scam_pattern, card_not_present_anomaly }
+ severity: { $ref: '#/components/schemas/Severity' }
+ status: { type: string, enum: [open, acknowledged, frozen, resolved] }
+ amount_at_risk: { $ref: '#/components/schemas/Money' }
+ recommended_action: { type: string, enum: [freeze, verify, monitor, none] }
+ evidence_ref: { type: string }
+ detected_at: { type: string, format: date-time }
+
+ PlanOption:
+ type: object
+ required: [option_id, summary, actions]
+ properties:
+ option_id: { type: string }
+ summary: { type: string }
+ projected_fws: { type: integer }
+ reversible: { type: boolean }
+ avoided_cost: { $ref: '#/components/schemas/Money' }
+ actions:
+ type: array
+ items:
+ type: object
+ additionalProperties: true
+ description: Structured action (e.g. fd_partial_liquidation with account + Money amount).
+
+ Plan:
+ type: object
+ required: [id, customer_id, status, options]
+ properties:
+ id: { type: string }
+ customer_id: { type: string }
+ status: { type: string, enum: [proposed, approved, rejected, vetoed, expired] }
+ created_at: { type: string, format: date-time }
+ expires_at: { type: string, format: date-time }
+ issue:
+ type: object
+ properties:
+ type: { type: string }
+ confidence: { type: number, minimum: 0, maximum: 1 }
+ evidence_ref: { type: string }
+ compliance_certified: { type: boolean }
+ compliance_certificate_id: { type: string }
+ options:
+ type: array
+ minItems: 2
+ maxItems: 3
+ items: { $ref: '#/components/schemas/PlanOption' }
+
+ Recommendation:
+ type: object
+ required: [id, title, plan_id]
+ properties:
+ id: { type: string }
+ title: { type: string }
+ issue_type: { type: string }
+ confidence: { type: number, minimum: 0, maximum: 1 }
+ priority: { type: integer }
+ plan_id: { type: string }
+
+ Simulation:
+ type: object
+ required: [plan_id, options]
+ properties:
+ plan_id: { type: string }
+ method: { type: string, enum: [monte_carlo, deterministic_whatif] }
+ runs: { type: integer }
+ options:
+ type: array
+ items:
+ type: object
+ properties:
+ option_id: { type: string }
+ projected_fws: { type: integer }
+ fws_delta: { type: integer }
+ p10_fws: { type: integer }
+ p50_fws: { type: integer }
+ p90_fws: { type: integer }
+ cashflow_impact: { $ref: '#/components/schemas/Money' }
+ avoided_cost: { $ref: '#/components/schemas/Money' }
+
+ ComplianceCertificate:
+ type: object
+ required: [id, plan_id, decision, certificate_hash]
+ properties:
+ id: { type: string }
+ plan_id: { type: string }
+ decision: { type: string, enum: [certify, veto] }
+ ruleset_version: { type: string }
+ certificate_hash: { type: string }
+ evaluated_at: { type: string, format: date-time }
+ checks:
+ type: array
+ items:
+ type: object
+ properties:
+ rule: { type: string }
+ result: { type: string, enum: [pass, fail, warn] }
+ detail: { type: string }
+ vetoed_options: { type: array, items: { type: string } }
+
+ Explanation:
+ type: object
+ required: [plan_id, plain_language]
+ properties:
+ plan_id: { type: string }
+ plain_language: { type: string, description: Customer-facing why, RAG-grounded. }
+ evidence:
+ type: array
+ items:
+ type: object
+ properties:
+ ref: { type: string }
+ label: { type: string }
+ kind: { type: string, enum: [transaction, balance, policy, circular] }
+ citations:
+ type: array
+ items:
+ type: object
+ properties:
+ doc_id: { type: string }
+ citation: { type: string }
+ reasoning_trace_ref: { type: string, description: Pointer to the agent trace (no PII). }
+
+ Approval:
+ type: object
+ required: [selected_option_id, certificate_hash, consent_id]
+ properties:
+ selected_option_id: { type: string }
+ certificate_hash: { type: string, description: The certificate hash the customer saw (optimistic lock). }
+ consent_id: { type: string, pattern: '^cnsnt_[A-Za-z0-9]+$' }
+ customer_acknowledgement: { type: string }
+
+ Execution:
+ type: object
+ required: [execution_id, plan_id, status]
+ properties:
+ execution_id: { type: string }
+ plan_id: { type: string }
+ selected_option_id: { type: string }
+ status: { type: string, enum: [pending, executing, completed, failed, reversed] }
+ rail: { type: string, description: e.g. core_banking_fd_sweep, upi, yono. }
+ estimated_settlement: { type: string, format: date-time }
+ settled_at: { type: string, format: date-time, nullable: true }
+ reversible: { type: boolean }
+ compliance_certificate_id: { type: string }
+ actions:
+ type: array
+ items:
+ type: object
+ additionalProperties: true
+ audit_ref: { type: string }
+ poll_url: { type: string }
+
+ AgentRun:
+ type: object
+ required: [id, type, status]
+ properties:
+ id: { type: string }
+ type: { type: string, enum: [orchestrator, financial_health, risk, fraud, planner, simulation, compliance, explainability] }
+ customer_id: { type: string }
+ status: { type: string, enum: [running, succeeded, failed, escalated] }
+ started_at: { type: string, format: date-time }
+ ended_at: { type: string, format: date-time, nullable: true }
+ trace_ref: { type: string }
+
+ AgentTrace:
+ type: object
+ required: [run_id, steps]
+ properties:
+ run_id: { type: string }
+ steps:
+ type: array
+ items:
+ type: object
+ properties:
+ seq: { type: integer }
+ agent: { type: string }
+ action: { type: string, description: node / tool call / decision (no PII). }
+ tool: { type: string, nullable: true }
+ result_ref: { type: string, description: Tokenized pointer to the result. }
+ at: { type: string, format: date-time }
+
+ AuditRecord:
+ type: object
+ required: [audit_ref, action, hash, prev_hash]
+ properties:
+ audit_ref: { type: string }
+ seq: { type: integer }
+ actor:
+ type: object
+ properties:
+ type: { type: string, enum: [customer, staff, agent, system] }
+ id: { type: string }
+ action: { type: string }
+ resource:
+ type: object
+ properties:
+ type: { type: string }
+ id: { type: string }
+ consent_id: { type: string, nullable: true }
+ occurred_at: { type: string, format: date-time }
+ prev_hash: { type: string }
+ hash: { type: string, description: H(prev_hash || record), tamper-evident chain. }
+
+ Notification:
+ type: object
+ required: [id, type, created_at]
+ properties:
+ id: { type: string }
+ type: { type: string, enum: [plan_proposed, fraud_alert, execution_completed, score_change] }
+ title: { type: string }
+ body: { type: string }
+ resource_ref: { type: string }
+ read: { type: boolean }
+ created_at: { type: string, format: date-time }
+
+ NotificationPreferences:
+ type: object
+ properties:
+ push: { type: boolean }
+ sms: { type: boolean }
+ email: { type: boolean }
+ quiet_hours:
+ type: object
+ properties:
+ start: { type: string, example: '22:00' }
+ end: { type: string, example: '07:00' }
+
+ Error:
+ type: object
+ required: [error]
+ properties:
+ error:
+ type: object
+ required: [code, message, status]
+ properties:
+ code:
+ type: string
+ enum:
+ - validation_failed
+ - unauthenticated
+ - forbidden
+ - consent_required
+ - not_found
+ - conflict
+ - idempotency_key_reused
+ - plan_not_approvable
+ - compliance_veto
+ - rate_limited
+ - internal_error
+ - upstream_unavailable
+ message: { type: string }
+ status: { type: integer }
+ trace_id: { type: string }
+ details:
+ type: array
+ items:
+ type: object
+ properties:
+ field: { type: string }
+ issue: { type: string }
+ value: { type: string }
+ doc_url: { type: string }
+
+webhooks:
+ planProposed:
+ post:
+ summary: plan.proposed, a plan was certified and proposed to the customer
+ requestBody:
+ content:
+ application/json:
+ schema:
+ type: object
+ properties:
+ event_id: { type: string }
+ type: { type: string, enum: [plan.proposed] }
+ created_at: { type: string, format: date-time }
+ api_version: { type: string }
+ data:
+ type: object
+ properties:
+ plan_id: { type: string }
+ customer_id: { type: string }
+ issue_type: { type: string }
+ option_count: { type: integer }
+ certificate_id: { type: string }
+ responses:
+ '2XX': { description: Acknowledged by subscriber }
+ executionCompleted:
+ post:
+ summary: execution.completed, bank rail finished executing an approved option
+ requestBody:
+ content:
+ application/json:
+ schema:
+ type: object
+ properties:
+ event_id: { type: string }
+ type: { type: string, enum: [execution.completed] }
+ created_at: { type: string, format: date-time }
+ api_version: { type: string }
+ data: { $ref: '#/components/schemas/Execution' }
+ responses:
+ '2XX': { description: Acknowledged by subscriber }

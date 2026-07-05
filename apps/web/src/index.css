@@ -1,0 +1,49 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap");
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+ html,
+ body,
+ #root {
+ height: 100%;
+ }
+ body {
+ @apply bg-[#F4F7FC] text-ink antialiased;
+ overflow-x: hidden;
+ }
+}
+
+@layer components {
+ .card {
+ @apply bg-white rounded-2xl border border-[rgba(11,27,63,.08)] shadow-card;
+ }
+ .chip {
+ @apply inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1 rounded-full bg-[#eef3ff] text-brand border border-[#dbe6ff];
+ }
+ .btn {
+ @apply inline-flex items-center justify-center gap-2 font-semibold rounded-xl px-4 py-2.5 transition active:scale-[.98];
+ }
+ .btn-primary {
+ @apply btn bg-brand text-white hover:bg-brand-400 shadow-[0_8px_20px_rgba(30,80,230,.28)];
+ }
+ .btn-ghost {
+ @apply btn bg-[#eef3ff] text-brand hover:bg-[#e2ebff];
+ }
+ .btn-line {
+ @apply btn border border-[rgba(11,27,63,.14)] text-ink hover:bg-[#f4f7fc];
+ }
+}
+
+/* thin scrollbar */
+::-webkit-scrollbar {
+ width: 10px;
+ height: 10px;
+}
+::-webkit-scrollbar-thumb {
+ background: rgba(11, 27, 63, 0.16);
+ border-radius: 99px;
+ border: 3px solid transparent;
+ background-clip: content-box;
+}
