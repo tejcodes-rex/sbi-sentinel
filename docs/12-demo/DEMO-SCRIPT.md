@@ -1,5 +1,9 @@
 # SBI Sentinel, 3-Minute Demo Script (Golden Path)
 
+> **A rendered demo video is included: [`SBI-Sentinel-Demo.mp4`](SBI-Sentinel-Demo.mp4)**
+> (1920×1080, 2:27, neural voice-over over the real product screens). This script below is
+> the reference it was built from and a guide for a live walkthrough.
+>
 > SBI Hackathon @ GFF 2026 · Prototype demo video **hard-capped at 3:00**.
 > Persona: **Rajesh Kumar**, 34, Pune, SBI salary account, home-loan EMI, 2 kids, under-insured.
 > Golden path from `docs/00-MASTER-CONCEPT.md` §8. One take, one browser tab, no dead air.

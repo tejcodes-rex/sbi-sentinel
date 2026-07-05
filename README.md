@@ -68,6 +68,7 @@ A single number `0-1000` from six pillars, **every point traceable to a transact
 | Pitch Deck (PDF) | [`docs/10-deck/SBI-Sentinel-Deck.pdf`](docs/10-deck/SBI-Sentinel-Deck.pdf) |
 | Portal-ready submission | [`docs/11-submission/`](docs/11-submission/PORTAL-READY-SUBMISSION.md) |
 | 3-minute Demo Script | [`docs/12-demo/`](docs/12-demo/DEMO-SCRIPT.md) |
+| **Demo video (2:27, narrated)** | [`docs/12-demo/SBI-Sentinel-Demo.mp4`](docs/12-demo/SBI-Sentinel-Demo.mp4) |
 | Build Plan | [`docs/13-build-plan/`](docs/13-build-plan/BUILD-PLAN.md) |
 | Repo Structure | [`docs/14-REPO-STRUCTURE.md`](docs/14-REPO-STRUCTURE.md) |
 | **Live React prototype** | [`apps/web/`](apps/web/) |

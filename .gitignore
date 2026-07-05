@@ -31,3 +31,6 @@ npm-debug.log*
 
 # Local QA/working screenshots (not part of the deliverable)
 assets/
+
+# Demo video build pipeline (working files)
+video/

@@ -6,7 +6,9 @@ type Stage = "choose" | "approved";
 
 export default function Planner() {
  const [selected, setSelected] = useState(plans.find((p) => p.recommended)!.id);
- const [stage, setStage] = useState<Stage>("choose");
+ const initialStage: Stage =
+   new URLSearchParams(window.location.search).get("stage") === "approved" ? "approved" : "choose";
+ const [stage, setStage] = useState<Stage>(initialStage);
  const plan = plans.find((p) => p.id === selected)!;
  const evTx = evidenceTxns.filter((t) => explanation.evidence.includes(t.id));
 
