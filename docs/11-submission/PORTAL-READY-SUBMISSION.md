@@ -26,10 +26,9 @@ SBI Sentinel: Autonomous Financial Wellbeing Engine
 ---
 
 ## Team details (Name & Organization, up to 4) *
-> Individual participation. Replace the organization with your college or company (or write
-> "Independent"). Add up to three more members here only if you are entering as a team.
+> Individual participation.
 ```
-Tejas Mane, [College or company; write "Independent" if none]. Sole team member, covering full-stack, AI/ML, and product.
+Tejas Mane, National Forensic Sciences University (NFSU), Gandhinagar. Sole builder covering product, full-stack engineering, and AI/ML.
 ```
 
 ---
